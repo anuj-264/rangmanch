@@ -1,6 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import validator from 'validator';
 
 const userSchema = new Schema({
     username: {
@@ -18,6 +19,7 @@ const userSchema = new Schema({
         required: true,
         unique: true,
         lowercase: true,
+        validate: [validator.isEmail, 'Please provide a valid email'],
         trim: true,
         maxlegth: [40, 'An username email name must have less or equal then 40 characters'],
         minlegth: [10, 'An email name must have more or equal then 10 characters']
