@@ -1,7 +1,9 @@
 import { v2 as cloudinary } from 'cloudinary';
 import fs from 'fs';
 
+import dotenv from 'dotenv';
 
+dotenv.config();
 
 // Configuring Cloudinary globally
 cloudinary.config({
@@ -9,6 +11,8 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+
 
 // Function to upload image to Cloudinary
 const uploadOnCloudinary = async (filePath) => {
@@ -21,9 +25,12 @@ const uploadOnCloudinary = async (filePath) => {
         const response = await cloudinary.uploader.upload(filePath, {
             resource_type: "auto",
         });
-
-        // File uploaded successfully
-        console.log("File uploaded successfully:", response.secure_url);
+        // Remove locally saved file asynchronously
+        try {
+            await fs.promises.unlink(filePath);
+        } catch (unlinkError) {
+            console.error("Failed to delete local file:", unlinkError.message);
+        }
         
         
         return response;

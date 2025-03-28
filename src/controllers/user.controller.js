@@ -4,10 +4,29 @@ import { User } from "../models/user.model.js";
 import uploadOnCloudinary from "../utils/cloudinary.js";
 import APIResponse from "../utils/APIResponse.js";
 
+
+const generateAccessTokenandRefreshToken = async (userId) => {
+    try {
+        const user = await User.findById(userId);
+        const accessToken = await user.generateAccessToken();
+        const refreshToken = await user.generateRefreshToken();
+        user.refreshToken = refreshToken;//save refresh token in db for future use 
+        await user.save({ validateBeforeSave: false });//to avoid validation error on save of password
+        return { accessToken, refreshToken };
+    }
+    catch {
+        throw new APIError(500, 'Failed to generate tokens');
+    }
+};
+
+
+
+
+
 const registerUser = asyncHandler(async (req, res) => {
     // get user details 
     const { fullname, email, password, username } = req.body;
-    console.log(email);
+
     // validation
     const validateFields = (fields) => {
         for (const [key, value] of Object.entries(fields)) {
@@ -32,6 +51,7 @@ const registerUser = asyncHandler(async (req, res) => {
     if (!avatarPath) {
         throw new APIError(400, 'Please provide an avatar image');
     }
+
 
     //upload to cloudinary,check avatar
     const avatar = await uploadOnCloudinary(avatarPath);
@@ -63,10 +83,98 @@ const registerUser = asyncHandler(async (req, res) => {
 
 
     // send response
-    return res.status(201).json(APIResponse(201, CreatedUser,'User created successfully'));
+    return res.status(201).json(new APIResponse(201, CreatedUser, 'User created successfully'));
 
 
 
 });
 
-export { registerUser }
+
+
+//LOGIN USER//
+
+const loginUser = asyncHandler(async (req, res) => {
+    // req body 
+    const { username, email, password } = req.body;
+
+    //username or email
+    if (!(username || email)) {
+        throw new APIError(400, 'Please provide username or email');
+    }
+
+    //find the user
+    const user = await User.findOne({ $or: [{ username }, { email }] });
+    if (!user) {
+        throw new APIError(404, 'User not found');
+    }
+
+    //pass check
+    const isValidPassword = await user.comparePassword(password);
+    if (!isValidPassword) {
+        throw new APIError(401, 'Invalid password');
+    }
+
+    //access and refresh token generation
+    const { accessToken, refreshToken } = await generateAccessTokenandRefreshToken(user._id);
+    const loggedInUser = await User.findById(user._id).select('-password -refreshToken');
+
+    //send res cookie
+    const cookieOptions = {
+        httpOnly: true, //cookie cannot be accessed or modified by browser only modified by server 
+        secure: true, //cookie will be sent only on https
+
+    };
+    return res
+        .status(200)
+        .cookie('accessToken', accessToken, cookieOptions)
+        .cookie('refreshToken', refreshToken, cookieOptions)
+        .json(new APIResponse(200, { loggedInUser, accessToken, refreshToken }, 'User logged in successfully'));
+
+
+
+
+});
+
+const logOutUser = asyncHandler(async (req, res) => {
+    //clear cookies
+    await User.findByIdAndUpdate(req.user._id, { $set: { refreshToken: undefined } },
+        { new: true }
+    );
+
+    const cookieOptions = {
+        httpOnly: true, //cookie cannot be accessed or modified by browser only modified by server 
+        secure: true, //cookie will be sent only on https
+
+    }
+    return res
+        .status(200)
+        .clearCookie('accessToken', cookieOptions)
+        .clearCookie('refreshToken', cookieOptions)
+        .json(new APIResponse(200, {}, 'User logged out successfully'));
+
+
+
+});
+
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const refreshToken = req.cookies.refreshToken || req.body.refreshToken;//get refresh token from cookie
+    if (!refreshToken) {
+        throw new APIError(401, 'No refresh token provided');
+    }
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) {
+        throw new APIError(401, 'Invalid refresh token'); 
+    }
+    if(user.refreshToken !== refreshToken){
+        throw new APIError(401, 'Invalid refresh token');
+    }
+    const accessToken = await user.generateAccessToken();
+    return res.status(200).cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: true,
+    }).json(new APIResponse(200, { accessToken }, 'Access token refreshed successfully'));
+});
+    
+
+export { registerUser, loginUser, logOutUser ,refreshAccessToken};
